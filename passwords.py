@@ -1,9 +1,10 @@
+import sqlite3
 import hashlib
-import json
 import os
 import pwinput
+from cryptography.fernet import Fernet
 
-
+# Color codes for terminal output
 BLUE = "\033[1;34m"
 GREEN = "\033[1;32m"
 RED = "\033[1;31m"
@@ -12,27 +13,74 @@ CYAN = "\033[1;36m"
 MAGENTA = "\033[1;35m"
 RESET = "\033[0m"
 
-data_file = "users.json"
-passwords_file = "passwords.json"
+DB_FILE = "database.db"
+
+def load_key():
+    """
+    Loads the secret key from 'secret.key'.
+    If the file does not exist, it generates a new key and saves it.
+    """
+    if os.path.exists("secret.key"):
+        with open("secret.key", "rb") as key_file:
+            key = key_file.read()
+    else:
+        key = Fernet.generate_key()
+        with open("secret.key", "wb") as key_file:
+            key_file.write(key)
+    return key
+
+KEY = load_key()
+cipher_suite = Fernet(KEY)
+
+def encrypt_data(data):
+    """Encrypts a string and returns a decoded ciphertext."""
+    return cipher_suite.encrypt(data.encode()).decode()
+
+def decrypt_data(data):
+    """Decrypts the ciphertext and returns the original string."""
+    return cipher_suite.decrypt(data.encode()).decode()
+
+class DatabaseManager:
+    def __init__(self, db_file):
+        self.conn = sqlite3.connect(db_file)
+        self.conn.execute("PRAGMA foreign_keys = 1")
+        self.create_tables()
+
+    def create_tables(self):
+        c = self.conn.cursor()
+        # Create users table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                security_question TEXT NOT NULL,
+                security_answer TEXT NOT NULL
+            )
+        ''')
+        # Create passwords table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS passwords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                platform_username TEXT NOT NULL,
+                email TEXT NOT NULL,
+                password TEXT NOT NULL,
+                FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE
+            )
+        ''')
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
 
 class UserManager:
-    def __init__(self, data_file):
-        self.data_file = data_file
-        self.users = self.load_users()
-
-    def load_users(self):
-        if os.path.exists(self.data_file):
-            with open(self.data_file, "r") as file:
-                return json.load(file)
-        return {}
-
-    def save_users(self):
-        with open(self.data_file, "w") as file:
-            json.dump(self.users, file, indent=4)
+    def __init__(self, db_manager):
+        self.db = db_manager
 
     def encrypt_password(self, password):
+        # For login passwords, we use a one-way SHA256 hash.
         return hashlib.sha256(password.encode()).hexdigest()
-
 
     def signup(self):
         os.system("cls")
@@ -43,60 +91,76 @@ class UserManager:
         elif not username.isalnum():
             input(RED + "❌ Please enter a valid username." + RESET)
             self.signup()
-        if username in self.users:
+            return
+        # Check if the username already exists
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT username FROM users WHERE username = ?", (username,))
+        if cur.fetchone():
             input(RED + "❌ Username already exists! Try another." + RESET)
             self.signup()
+            return
         password = UserManager.get_password(GREEN + "🔒  Enter password: " + RESET)
         if not password:
             input(RED + "❌ Please enter a valid password." + RESET)
             self.signup()
-        confirm = input(YELLOW + f"\nYour password is: {GREEN}{password}{YELLOW}. Do you confirm this password?  " + RESET)
-        if confirm.lower() == "yes" or confirm.lower() == "y":
+            return
+        confirm = input(YELLOW + f"\nYour password is: {GREEN}{password}{YELLOW}. Do you confirm this password? (yes/no): " + RESET)
+        if confirm.lower() in ["yes", "y"]:
             security_question = input(YELLOW + "🔐 Set a security question (e.g., Your pet's name?): " + RESET)
             security_answer = input(YELLOW + "🔑 Answer: " + RESET).lower()
-            self.users[username] = {"password": self.encrypt_password(password), "security_question": security_question, "security_answer": security_answer}
-            self.save_users()
+            hashed_password = self.encrypt_password(password)
+            # Encrypt security question and answer
+            encrypted_question = encrypt_data(security_question)
+            encrypted_answer = encrypt_data(security_answer)
+            cur.execute("INSERT INTO users (username, password, security_question, security_answer) VALUES (?, ?, ?, ?)",
+                        (username, hashed_password, encrypted_question, encrypted_answer))
+            self.db.conn.commit()
             print("\n" + GREEN + "✅ Signup successful!" + RESET)
-        elif confirm.lower() == "no" or confirm.lower() == "n":
-            input(RED + "❌ Please Enter password again! Press enter to continue." + RESET)
+        elif confirm.lower() in ["no", "n"]:
+            input(RED + "❌ Please enter password again! Press enter to continue." + RESET)
             self.signup()
         else:
             input(RED + "❌ Invalid Input!" + RESET)
             self.signup()
 
-
     @staticmethod
     def get_password(txt):
         return pwinput.pwinput(prompt=txt)
 
-
     def list_users(self):
         os.system("cls")
         UI.print_heading("listusers")
-        if self.users:
-            print(CYAN,end="")
-            for i, user in enumerate(self.users.keys(), 1):
-                print(f"{i}. {user}")
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT username FROM users")
+        users = cur.fetchall()
+        if users:
+            print(CYAN, end="")
+            for i, user in enumerate(users, 1):
+                print(f"{i}. {user[0]}")
             print(RESET)
         else:
             print(RED + "❌ No users found!" + RESET)
-        input("\nPress Enter to continue...")
-
+        input()
 
     def login(self):
         os.system("cls")
         UI.print_heading("login")
-        print("[NOTE]: Press F Key in case of forgetting password.")
+        print("[NOTE]: Press F key in case of forgetting password.")
         username = input(BLUE + "👤 Enter username: " + RESET)
-        if username.lower()=="f":
+        if username.lower() == "f":
             self.forget_password()
-        if username.lower() == "back":
-            return
-        password = self.get_password(BLUE + "🔑 Enter password: " + RESET)
-        if "password" not in self.users[username]:
-            input("\n⚠️ User data is corrupted. Contact support!")
             return None
-        if username in self.users and self.users[username]["password"] == self.encrypt_password(password):
+        if username.lower() == "back":
+            return None
+        password = self.get_password(BLUE + "🔑 Enter password: " + RESET)
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT password FROM users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        if row is None:
+            input(RED + "\n❌ Invalid username or password!" + RESET)
+            return None
+        stored_hash = row[0]
+        if stored_hash == self.encrypt_password(password):
             print("\n" + GREEN + "✅ Login successful! Welcome back!" + RESET)
             return username
         else:
@@ -107,20 +171,26 @@ class UserManager:
         os.system("cls")
         UI.print_heading("forgetpass")
         username = input(YELLOW + "👤 Enter your username: " + RESET)
-        if username in self.users:
-            print(YELLOW + "Q: "+ self.users[username]["security_question"] + RESET)
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT security_question, security_answer FROM users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        if row:
+            # Decrypt the stored security question for display
+            decrypted_question = decrypt_data(row[0])
+            print(YELLOW + "Q: " + decrypted_question + RESET)
             answer = input(YELLOW + "🔑 Answer: " + RESET).lower()
-            if answer == self.users[username]["security_answer"]:
+            decrypted_answer = decrypt_data(row[1])
+            if answer == decrypted_answer:
                 new_password = UserManager.get_password(GREEN + "🔒 Enter new password: " + RESET)
-                self.users[username]["password"] = self.encrypt_password(new_password)
-                self.save_users()
+                hashed_password = self.encrypt_password(new_password)
+                cur.execute("UPDATE users SET password = ? WHERE username = ?", (hashed_password, username))
+                self.db.conn.commit()
                 input(GREEN + "✅ Password reset successful!" + RESET)
             else:
                 input(RED + "❌ Incorrect answer!" + RESET)
         else:
             input(RED + "❌ Username not found!" + RESET)
         self.login()
-        
 
     def delete_account(self):
         os.system("cls")
@@ -129,12 +199,16 @@ class UserManager:
         if username.lower() == "back":
             return
         password = self.get_password(YELLOW + "🔑  Enter password: " + RESET)
-        if username in self.users and self.users[username] == self.encrypt_password(password):
-            confirm = input(YELLOW + f"\nAll your saved passwords will be removed. Are you sure you want to continue?  " + RESET)
-            if confirm.lower() == "yes" or confirm.lower() == "y":
-                del self.users[username]
-                self.save_users()
-            elif confirm.lower() == "no" or confirm.lower() == "n":
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT password FROM users WHERE username = ?", (username,))
+        row = cur.fetchone()
+        if row and row[0] == self.encrypt_password(password):
+            confirm = input(YELLOW + "\nAll your saved passwords will be removed. Are you sure you want to continue? (yes/no): " + RESET)
+            if confirm.lower() in ["yes", "y"]:
+                cur.execute("DELETE FROM users WHERE username = ?", (username,))
+                self.db.conn.commit()
+                print(GREEN + "✅ Account deleted!" + RESET)
+            elif confirm.lower() in ["no", "n"]:
                 input(RED + "❌ Deletion of Account canceled." + RESET)
                 self.signup()
             else:
@@ -144,86 +218,91 @@ class UserManager:
             print(RED + "❌ Invalid username or password!" + RESET)
 
 class PasswordManager:
-    def __init__(self, passwords_file):
-        self.passwords_file = passwords_file
-        self.passwords = self.load_passwords()
-
-    def load_passwords(self):
-        if os.path.exists(self.passwords_file):
-            with open(self.passwords_file, "r") as file:
-                return json.load(file)
-        return {}
-
-    def save_passwords(self):
-        with open(self.passwords_file, "w") as file:
-            json.dump(self.passwords, file, indent=4)
+    def __init__(self, db_manager):
+        self.db = db_manager
 
     def add_password(self, username):
         os.system("cls")
         UI.print_heading("addpass")
-        platform = (input(GREEN + "🌐 Enter platform name: " + RESET)).lower()
+        platform = input(GREEN + "🌐 Enter platform name: " + RESET).lower()
         platform_username = input(GREEN + "👤 Enter username: " + RESET)
         email = input(GREEN + "📧 Enter email: " + RESET)
         password = UserManager.get_password(GREEN + "🔒 Enter password: " + RESET)
-        confirm = input(YELLOW + f"\nYour password is: {GREEN}{password}{YELLOW}. Do you confirm this password?  " + RESET)
-        if confirm.lower() == "yes" or confirm.lower() == "y":
-            if username not in self.passwords:
-                self.passwords[username] = {}
-                self.passwords[username][platform] = {"username": platform_username, "email": email, "password": password}
-                self.save_passwords()
-                print(GREEN + "✅ Password saved!" + RESET)
-        elif confirm.lower() == "no" or confirm.lower() == "n":
-            input(RED + "❌ Please Enter password again! Press enter to continue." + RESET)
-            self.signup()
+        confirm = input(YELLOW + f"\nYour password is: {GREEN}{password}{YELLOW}. Do you confirm this password? (yes/no): " + RESET)
+        if confirm.lower() in ["yes", "y"]:
+            # Encrypt the platform password before storing it
+            encrypted_pass = encrypt_data(password)
+            cur = self.db.conn.cursor()
+            cur.execute("INSERT INTO passwords (username, platform, platform_username, email, password) VALUES (?, ?, ?, ?, ?)",
+                        (username, platform, platform_username, email, encrypted_pass))
+            self.db.conn.commit()
+            print(GREEN + "✅ Password saved!" + RESET)
+        elif confirm.lower() in ["no", "n"]:
+            input(RED + "❌ Please enter password again! Press enter to continue." + RESET)
+            self.add_password(username)
         else:
             input(RED + "❌ Invalid Input!" + RESET)
-            self.signup()
+            self.add_password(username)
 
     def access_passwords(self, username):
         os.system("cls")
         UI.print_heading("accesspass")
-        platform = (input(CYAN + "🔎 Enter platform name: " + RESET)).lower()
-        if username in self.passwords and platform in self.passwords[username]:
-            creds = self.passwords[username][platform]
-            print(CYAN + f"Platform: {platform}\nUsername: {creds['username']}\nEmail: {creds['email']}\nPassword: {creds['password']}" + RESET)
+        platform = input(CYAN + "🔎 Enter platform name: " + RESET).lower()
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT platform_username, email, password FROM passwords WHERE username = ? AND platform = ?", (username, platform))
+        row = cur.fetchone()
+        if row:
+            decrypted_pass = decrypt_data(row[2])
+            print(CYAN + f"Platform: {platform}\nUsername: {row[0]}\nEmail: {row[1]}\nPassword: {decrypted_pass}" + RESET)
         else:
             print(RED + "❌ No saved credentials for this platform!" + RESET)
+        input("\nPress Enter to continue...")
 
     def delete_password(self, username):
         os.system("cls")
         UI.print_heading("delpass")
-        platform = (input(YELLOW + "🗑️ Enter platform name to delete: " + RESET)).lower()
-        if username in self.passwords and platform in self.passwords[username]:
-            del self.passwords[username][platform]
-            self.save_passwords()
+        platform = input(YELLOW + "🗑️ Enter platform name to delete: " + RESET).lower()
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT id FROM passwords WHERE username = ? AND platform = ?", (username, platform))
+        row = cur.fetchone()
+        if row:
+            cur.execute("DELETE FROM passwords WHERE id = ?", (row[0],))
+            self.db.conn.commit()
             print(GREEN + "✅ Password deleted!" + RESET)
         else:
             print(RED + "❌ No such password found!" + RESET)
-    
+        input()
+
     def edit_password(self, username):
         os.system("cls")
         UI.print_heading("editpass")
-        platform = (input(YELLOW + "✏️ Enter platform name to edit: " + RESET)).lower()
-        if username in self.passwords and platform in self.passwords[username]:
+        platform = input(YELLOW + "✏️ Enter platform name to edit: " + RESET).lower()
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT id FROM passwords WHERE username = ? AND platform = ?", (username, platform))
+        row = cur.fetchone()
+        if row:
             platform_username = input(YELLOW + "👤 Enter new username: " + RESET)
-            password = input(YELLOW + "🔒 Enter new password: " + RESET)
-            self.passwords[username][platform]["username"] = platform_username
-            self.passwords[username][platform]["password"] = password
-            self.save_passwords()
+            new_password = input(YELLOW + "🔒 Enter new password: " + RESET)
+            encrypted_pass = encrypt_data(new_password)
+            cur.execute("UPDATE passwords SET platform_username = ?, password = ? WHERE id = ?", (platform_username, encrypted_pass, row[0]))
+            self.db.conn.commit()
             print(GREEN + "✅ Password updated successfully!" + RESET)
         else:
             print(RED + "❌ No saved credentials for this platform!" + RESET)
-    
+        input("\nPress Enter to continue...")
+
     def show_listed_platforms(self, username):
         os.system("cls")
         UI.print_heading("showplat")
-        i=0
-        if username in self.passwords:
-            for platform in self.passwords[username]:
-                i+=1
-                print(CYAN + f"{i}. {platform.title()}" + RESET)
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT DISTINCT platform FROM passwords WHERE username = ?", (username,))
+        rows = cur.fetchall()
+        if rows:
+            for i, row in enumerate(rows, 1):
+                print(CYAN + f"{i}. {row[0].title()}" + RESET)
         else:
             print(RED + "❌ No saved platforms found!" + RESET)
+        input()
 
 class UI:
     @staticmethod
@@ -277,11 +356,11 @@ class UI:
             print("⭐ Forget Password ⭐".center(35))
             print("=" * 35 + RESET)
 
-
 class Application:
-    def __init__(self):
-        self.user_manager = UserManager(data_file)
-        self.password_manager = PasswordManager(passwords_file)
+    def __init__(self, db_file):
+        self.db_manager = DatabaseManager(db_file)
+        self.user_manager = UserManager(self.db_manager)
+        self.password_manager = PasswordManager(self.db_manager)
 
     def password_menu(self, username):
         while True:
@@ -309,7 +388,6 @@ class Application:
             else:
                 print(RED + "❌ Invalid choice! Try again." + RESET)
             input()
-        
 
     def run(self):
         while True:
@@ -331,7 +409,7 @@ class Application:
                 self.user_manager.list_users()
             elif choice == "4":
                 self.user_manager.delete_account()
-            elif choice=="5":
+            elif choice == "5":
                 print(GREEN + "🚪 Exiting... Goodbye!" + RESET)
                 break
             else:
@@ -339,5 +417,5 @@ class Application:
             input()
 
 if __name__ == "__main__":
-    app = Application()
+    app = Application(DB_FILE)
     app.run()
