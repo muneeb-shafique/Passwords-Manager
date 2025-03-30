@@ -40,6 +40,38 @@ def decrypt_data(data):
     """Decrypts the ciphertext and returns the original string."""
     return cipher_suite.decrypt(data.encode()).decode()
 
+def check_password_strength(password: str) -> str:
+    """
+    Checks the strength of the password.
+    Criteria:
+      - Length at least 8
+      - Contains lowercase letters
+      - Contains uppercase letters
+      - Contains digits
+      - Contains special characters
+    Returns: A string rating: Weak, Medium, Strong, or Very Strong.
+    """
+    score = 0
+    if len(password) >= 8:
+        score += 1
+    if any(c.islower() for c in password):
+        score += 1
+    if any(c.isupper() for c in password):
+        score += 1
+    if any(c.isdigit() for c in password):
+        score += 1
+    if any(c in "!@#$%^&*()-_=+[{]}\\|;:'\",<.>/?`~" for c in password):
+        score += 1
+
+    if score <= 2:
+        return "Weak"
+    elif score == 3:
+        return "Medium"
+    elif score == 4:
+        return "Strong"
+    else:
+        return "Very Strong"
+
 class DatabaseManager:
     def __init__(self, db_file):
         self.conn = sqlite3.connect(db_file)
@@ -83,7 +115,7 @@ class UserManager:
         return hashlib.sha256(password.encode()).hexdigest()
 
     def signup(self):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("signup")
         username = input(GREEN + "📝  Enter username: " + RESET)
         if username.lower() == "back":
@@ -100,6 +132,13 @@ class UserManager:
             self.signup()
             return
         password = UserManager.get_password(GREEN + "🔒  Enter password: " + RESET)
+        rating = check_password_strength(password)
+        print(YELLOW + f"Password Strength: {rating}" + RESET)
+        if rating == "Weak":
+            choice = input(RED + "Your password is weak. Do you want to re-enter? (yes/no): " + RESET)
+            if choice.lower() in ["yes", "y"]:
+                self.signup()
+                return
         if not password:
             input(RED + "❌ Please enter a valid password." + RESET)
             self.signup()
@@ -128,7 +167,7 @@ class UserManager:
         return pwinput.pwinput(prompt=txt)
 
     def list_users(self):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("listusers")
         cur = self.db.conn.cursor()
         cur.execute("SELECT username FROM users")
@@ -143,7 +182,7 @@ class UserManager:
         input()
 
     def login(self):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("login")
         print("[NOTE]: Press F key in case of forgetting password.")
         username = input(BLUE + "👤 Enter username: " + RESET)
@@ -168,7 +207,7 @@ class UserManager:
             return None
 
     def forget_password(self):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("forgetpass")
         username = input(YELLOW + "👤 Enter your username: " + RESET)
         cur = self.db.conn.cursor()
@@ -182,6 +221,13 @@ class UserManager:
             decrypted_answer = decrypt_data(row[1])
             if answer == decrypted_answer:
                 new_password = UserManager.get_password(GREEN + "🔒 Enter new password: " + RESET)
+                rating = check_password_strength(new_password)
+                print(YELLOW + f"New Password Strength: {rating}" + RESET)
+                if rating == "Weak":
+                    choice = input(RED + "Your new password is weak. Do you want to re-enter? (yes/no): " + RESET)
+                    if choice.lower() in ["yes", "y"]:
+                        self.forget_password()
+                        return
                 hashed_password = self.encrypt_password(new_password)
                 cur.execute("UPDATE users SET password = ? WHERE username = ?", (hashed_password, username))
                 self.db.conn.commit()
@@ -193,7 +239,7 @@ class UserManager:
         self.login()
 
     def delete_account(self):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("delacc")
         username = input(YELLOW + "🗑️  Enter username: " + RESET)
         if username.lower() == "back":
@@ -222,12 +268,19 @@ class PasswordManager:
         self.db = db_manager
 
     def add_password(self, username):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("addpass")
         platform = input(GREEN + "🌐 Enter platform name: " + RESET).lower()
         platform_username = input(GREEN + "👤 Enter username: " + RESET)
         email = input(GREEN + "📧 Enter email: " + RESET)
         password = UserManager.get_password(GREEN + "🔒 Enter password: " + RESET)
+        rating = check_password_strength(password)
+        print(YELLOW + f"Password Strength: {rating}" + RESET)
+        if rating == "Weak":
+            choice = input(RED + "Your password is weak. Do you want to re-enter? (yes/no): " + RESET)
+            if choice.lower() in ["yes", "y"]:
+                self.add_password(username)
+                return
         confirm = input(YELLOW + f"\nYour password is: {GREEN}{password}{YELLOW}. Do you confirm this password? (yes/no): " + RESET)
         if confirm.lower() in ["yes", "y"]:
             # Encrypt the platform password before storing it
@@ -245,7 +298,7 @@ class PasswordManager:
             self.add_password(username)
 
     def access_passwords(self, username):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("accesspass")
         platform = input(CYAN + "🔎 Enter platform name: " + RESET).lower()
         cur = self.db.conn.cursor()
@@ -259,7 +312,7 @@ class PasswordManager:
         input("\nPress Enter to continue...")
 
     def delete_password(self, username):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("delpass")
         platform = input(YELLOW + "🗑️ Enter platform name to delete: " + RESET).lower()
         cur = self.db.conn.cursor()
@@ -274,7 +327,7 @@ class PasswordManager:
         input()
 
     def edit_password(self, username):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("editpass")
         platform = input(YELLOW + "✏️ Enter platform name to edit: " + RESET).lower()
         cur = self.db.conn.cursor()
@@ -283,6 +336,13 @@ class PasswordManager:
         if row:
             platform_username = input(YELLOW + "👤 Enter new username: " + RESET)
             new_password = input(YELLOW + "🔒 Enter new password: " + RESET)
+            rating = check_password_strength(new_password)
+            print(YELLOW + f"New Password Strength: {rating}" + RESET)
+            if rating == "Weak":
+                choice = input(RED + "Your new password is weak. Do you want to re-enter? (yes/no): " + RESET)
+                if choice.lower() in ["yes", "y"]:
+                    self.edit_password(username)
+                    return
             encrypted_pass = encrypt_data(new_password)
             cur.execute("UPDATE passwords SET platform_username = ?, password = ? WHERE id = ?", (platform_username, encrypted_pass, row[0]))
             self.db.conn.commit()
@@ -292,7 +352,7 @@ class PasswordManager:
         input("\nPress Enter to continue...")
 
     def show_listed_platforms(self, username):
-        os.system("cls")
+        os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("showplat")
         cur = self.db.conn.cursor()
         cur.execute("SELECT DISTINCT platform FROM passwords WHERE username = ?", (username,))
@@ -303,6 +363,22 @@ class PasswordManager:
         else:
             print(RED + "❌ No saved platforms found!" + RESET)
         input()
+
+    def check_password_health(self, username):
+        os.system("cls" if os.name == "nt" else "clear")
+        UI.print_heading("passhealth")
+        cur = self.db.conn.cursor()
+        cur.execute("SELECT platform, password FROM passwords WHERE username = ?", (username,))
+        rows = cur.fetchall()
+        if rows:
+            for row in rows:
+                platform, encrypted_pass = row
+                plain_password = decrypt_data(encrypted_pass)
+                rating = check_password_strength(plain_password)
+                print(CYAN + f"Platform: {platform.title()} -> Password Strength: {rating}" + RESET)
+        else:
+            print(RED + "❌ No saved platform passwords found!" + RESET)
+        input("\nPress Enter to continue...")
 
 class UI:
     @staticmethod
@@ -355,6 +431,10 @@ class UI:
             print(GREEN + "=" * 35)
             print("⭐ Forget Password ⭐".center(35))
             print("=" * 35 + RESET)
+        elif txt == "passhealth":
+            print(GREEN + "=" * 35)
+            print("⭐ Password Health Check ⭐".center(35))
+            print("=" * 35 + RESET)
 
 class Application:
     def __init__(self, db_file):
@@ -364,14 +444,15 @@ class Application:
 
     def password_menu(self, username):
         while True:
-            os.system("cls")
+            os.system("cls" if os.name == "nt" else "clear")
             UI.print_heading("passmenu")
             print(CYAN + "1.  Add Password" + RESET)
             print(CYAN + "2.  Access Passwords" + RESET)
             print(CYAN + "3.  Edit Password" + RESET)
             print(CYAN + "4.  Delete Password" + RESET)
             print(CYAN + "5.  List Platforms" + RESET)
-            print(CYAN + "6.  Logout" + RESET)
+            print(CYAN + "6.  Check Password Health" + RESET)
+            print(CYAN + "7.  Logout" + RESET)
             choice = input(MAGENTA + "👉 Enter your choice: " + RESET)
             if choice == "1":
                 self.password_manager.add_password(username)
@@ -384,6 +465,8 @@ class Application:
             elif choice == "5":
                 self.password_manager.show_listed_platforms(username)
             elif choice == "6":
+                self.password_manager.check_password_health(username)
+            elif choice == "7":
                 break
             else:
                 print(RED + "❌ Invalid choice! Try again." + RESET)
@@ -391,7 +474,7 @@ class Application:
 
     def run(self):
         while True:
-            os.system("cls")
+            os.system("cls" if os.name == "nt" else "clear")
             UI.print_heading("main")
             print(CYAN + "1.  Signup" + RESET)
             print(CYAN + "2.  Login" + RESET)
