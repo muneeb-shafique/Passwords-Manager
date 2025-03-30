@@ -1,12 +1,18 @@
 import sqlite3
 import hashlib
 import os
+import json
 import pwinput
 import secrets
 import string
+import socket
+import firebase_admin
+from firebase_admin import credentials, firestore
 from cryptography.fernet import Fernet
 
+# -----------------------------
 # Color codes for terminal output
+# -----------------------------
 BLUE = "\033[1;34m"
 GREEN = "\033[1;32m"
 RED = "\033[1;31m"
@@ -17,6 +23,109 @@ RESET = "\033[0m"
 
 DB_FILE = "database.db"
 
+# -----------------------------
+# Firebase Initialization
+# -----------------------------
+db_online = None  # This will hold our Firestore client
+
+def init_firebase():
+    """
+    Initialize Firebase using your private serviceAccountKey.json file.
+    If initialization fails, db_online remains None.
+    """
+    global db_online
+    try:
+        cred = credentials.Certificate("serviceAccountKey.json")
+        firebase_admin.initialize_app(cred)
+        db_online = firestore.client()
+        print(GREEN + "Firebase initialized successfully." + RESET)
+    except Exception as e:
+        print(RED + "Error initializing Firebase: " + str(e) + RESET)
+        db_online = None
+
+def internet_available(host="8.8.8.8", port=53, timeout=3):
+    """
+    Check if there is an internet connection by trying to connect to a known host.
+    Default is Google's public DNS.
+    """
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except socket.error:
+        return False
+
+def backup_online_data(db_manager):
+    """
+    Extracts the entire local database (both users and passwords) and uploads it to Firestore.
+    The backup is stored under collection 'db_backup' in document 'backup'.
+    """
+    if db_online is None:
+        print(RED + "Firebase not initialized. Cannot backup online." + RESET)
+        return
+
+    if not internet_available():
+        print(RED + "No internet connection. Online backup skipped." + RESET)
+        return
+
+    try:
+        cur = db_manager.conn.cursor()
+        # Fetch users as dictionaries
+        cur.execute("SELECT username, password, security_question, security_answer FROM users")
+        users_columns = [desc[0] for desc in cur.description]
+        users_data = [dict(zip(users_columns, row)) for row in cur.fetchall()]
+
+        # Fetch passwords as dictionaries
+        cur.execute("SELECT id, username, platform, platform_username, email, password FROM passwords")
+        pass_columns = [desc[0] for desc in cur.description]
+        passwords_data = [dict(zip(pass_columns, row)) for row in cur.fetchall()]
+
+        backup_dict = {"users": users_data, "passwords": passwords_data}
+
+        db_online.collection("db_backup").document("backup").set(backup_dict)
+        print(GREEN + "Online backup successful!" + RESET)
+    except Exception as e:
+        print(RED + "Error during online backup: " + str(e) + RESET)
+
+def restore_online_data(db_manager):
+    """
+    Restores the entire database (users and passwords) from the online backup.
+    WARNING: This will delete your current local data and replace it with the backup.
+    """
+    if db_online is None:
+        print(RED + "Firebase not initialized. Cannot restore online backup." + RESET)
+        return
+
+    if not internet_available():
+        print(RED + "No internet connection. Cannot restore online backup." + RESET)
+        return
+
+    try:
+        doc = db_online.collection("db_backup").document("backup").get()
+        if doc.exists:
+            data = doc.to_dict()
+            cur = db_manager.conn.cursor()
+            # Delete current data
+            cur.execute("DELETE FROM users")
+            cur.execute("DELETE FROM passwords")
+            # Restore users
+            for user in data.get("users", []):
+                cur.execute("INSERT INTO users (username, password, security_question, security_answer) VALUES (?, ?, ?, ?)",
+                            (user["username"], user["password"], user["security_question"], user["security_answer"]))
+            # Restore passwords
+            for entry in data.get("passwords", []):
+                cur.execute("INSERT INTO passwords (id, username, platform, platform_username, email, password) VALUES (?, ?, ?, ?, ?, ?)",
+                            (entry["id"], entry["username"], entry["platform"], entry["platform_username"], entry["email"], entry["password"]))
+            db_manager.conn.commit()
+            print(GREEN + "Online restore successful!" + RESET)
+        else:
+            print(RED + "No online backup found." + RESET)
+    except Exception as e:
+        print(RED + "Error during online restore: " + str(e) + RESET)
+
+# -----------------------------
+# Encryption Utilities
+# -----------------------------
 def load_key():
     """
     Loads the secret key from 'secret.key'.
@@ -42,6 +151,9 @@ def decrypt_data(data):
     """Decrypts the ciphertext and returns the original string."""
     return cipher_suite.decrypt(data.encode()).decode()
 
+# -----------------------------
+# Password Strength & Generation
+# -----------------------------
 def check_password_strength(password: str) -> str:
     """
     Checks the strength of the password.
@@ -93,6 +205,9 @@ def auto_generate_password(length=12) -> str:
     secrets.SystemRandom().shuffle(password_list)
     return ''.join(password_list)
 
+# -----------------------------
+# Database & User Management
+# -----------------------------
 class DatabaseManager:
     def __init__(self, db_file):
         self.conn = sqlite3.connect(db_file)
@@ -502,12 +617,36 @@ class UI:
             print(GREEN + "=" * 35)
             print("⭐ Password Health Check ⭐".center(35))
             print("=" * 35 + RESET)
+        elif txt == "backupmenu":
+            print(GREEN + "=" * 40)
+            print("⭐ Backup & Restore Menu ⭐".center(40))
+            print("=" * 40 + RESET)
 
 class Application:
     def __init__(self, db_file):
         self.db_manager = DatabaseManager(db_file)
         self.user_manager = UserManager(self.db_manager)
         self.password_manager = PasswordManager(self.db_manager)
+
+    def backup_restore_menu(self):
+        while True:
+            os.system("cls" if os.name == "nt" else "clear")
+            UI.print_heading("backupmenu")
+            print(CYAN + "1.  Online Backup" + RESET)
+            print(CYAN + "2.  Online Restore" + RESET)
+            print(CYAN + "3.  Back to Main Menu" + RESET)
+            choice = input(MAGENTA + "👉 Enter your choice: " + RESET)
+            if choice == "1":
+                backup_online_data(self.db_manager)
+                input("\nPress Enter to continue...")
+            elif choice == "2":
+                restore_online_data(self.db_manager)
+                input("\nPress Enter to continue...")
+            elif choice == "3":
+                break
+            else:
+                print(RED + "❌ Invalid choice! Try again." + RESET)
+                input()
 
     def password_menu(self, username):
         while True:
@@ -547,19 +686,24 @@ class Application:
             print(CYAN + "2.  Login" + RESET)
             print(CYAN + "3.  List Users" + RESET)
             print(CYAN + "4.  Delete Account" + RESET)
-            print(CYAN + "5.  Exit" + RESET)
+            print(CYAN + "5.  Backup & Restore" + RESET)
+            print(CYAN + "6.  Exit" + RESET)
             choice = input(MAGENTA + "👉 Enter your choice: " + RESET)
             if choice == "1":
                 self.user_manager.signup()
             elif choice == "2":
                 username = self.user_manager.login()
                 if username:
+                    # Automatically back up online after login if internet is available.
+                    backup_online_data(self.db_manager)
                     self.password_menu(username)
             elif choice == "3":
                 self.user_manager.list_users()
             elif choice == "4":
                 self.user_manager.delete_account()
             elif choice == "5":
+                self.backup_restore_menu()
+            elif choice == "6":
                 print(GREEN + "🚪 Exiting... Goodbye!" + RESET)
                 break
             else:
@@ -567,5 +711,7 @@ class Application:
             input()
 
 if __name__ == "__main__":
+    # Initialize Firebase for online backup/restore
+    init_firebase()
     app = Application(DB_FILE)
     app.run()
