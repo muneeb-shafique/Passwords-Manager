@@ -2,6 +2,8 @@ import sqlite3
 import hashlib
 import os
 import pwinput
+import secrets
+import string
 from cryptography.fernet import Fernet
 
 # Color codes for terminal output
@@ -72,6 +74,25 @@ def check_password_strength(password: str) -> str:
     else:
         return "Very Strong"
 
+def auto_generate_password(length=12) -> str:
+    """
+    Generates a random password of specified length ensuring at least one lowercase, one uppercase,
+    one digit, and one special character.
+    """
+    if length < 8:
+        length = 8
+    lower = secrets.choice(string.ascii_lowercase)
+    upper = secrets.choice(string.ascii_uppercase)
+    digit = secrets.choice(string.digits)
+    special = secrets.choice("!@#$%^&*()-_=+[{]}\\|;:'\",<.>/?`~")
+    if length > 4:
+        rest = ''.join(secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*()-_=+[{]}\\|;:'\",<.>/?`~") for _ in range(length - 4))
+    else:
+        rest = ''
+    password_list = list(lower + upper + digit + special + rest)
+    secrets.SystemRandom().shuffle(password_list)
+    return ''.join(password_list)
+
 class DatabaseManager:
     def __init__(self, db_file):
         self.conn = sqlite3.connect(db_file)
@@ -117,7 +138,7 @@ class UserManager:
     def signup(self):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("signup")
-        username = input(GREEN + "📝  Enter username: " + RESET)
+        username = input(GREEN + "📝  Enter username (or type 'back' to go back to main menu): " + RESET)
         if username.lower() == "back":
             return
         elif not username.isalnum():
@@ -131,7 +152,12 @@ class UserManager:
             input(RED + "❌ Username already exists! Try another." + RESET)
             self.signup()
             return
-        password = UserManager.get_password(GREEN + "🔒  Enter password: " + RESET)
+        password = UserManager.get_password(GREEN + "🔒  Enter password (or type 'auto' to generate one, 'back' to return): " + RESET)
+        if password.lower() == "back":
+            return
+        if password.lower() == "auto":
+            password = auto_generate_password()
+            print(YELLOW + f"Auto-generated Password: {password}" + RESET)
         rating = check_password_strength(password)
         print(YELLOW + f"Password Strength: {rating}" + RESET)
         if rating == "Weak":
@@ -145,8 +171,12 @@ class UserManager:
             return
         confirm = input(YELLOW + f"\nYour password is: {GREEN}{password}{YELLOW}. Do you confirm this password? (yes/no): " + RESET)
         if confirm.lower() in ["yes", "y"]:
-            security_question = input(YELLOW + "🔐 Set a security question (e.g., Your pet's name?): " + RESET)
-            security_answer = input(YELLOW + "🔑 Answer: " + RESET).lower()
+            security_question = input(YELLOW + "🔐 Set a security question (e.g., Your pet's name, or type 'back' to return): " + RESET)
+            if security_question.lower() == "back":
+                return
+            security_answer = input(YELLOW + "🔑 Answer (or type 'back' to return): " + RESET).lower()
+            if security_answer.lower() == "back":
+                return
             hashed_password = self.encrypt_password(password)
             # Encrypt security question and answer
             encrypted_question = encrypt_data(security_question)
@@ -184,14 +214,16 @@ class UserManager:
     def login(self):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("login")
-        print("[NOTE]: Press F key in case of forgetting password.")
-        username = input(BLUE + "👤 Enter username: " + RESET)
+        print("[NOTE]: Press F for forgotten password or type 'back' to go back to main menu.")
+        username = input(BLUE + "👤 Enter username (or 'back' to return): " + RESET)
         if username.lower() == "f":
             self.forget_password()
             return None
         if username.lower() == "back":
             return None
-        password = self.get_password(BLUE + "🔑 Enter password: " + RESET)
+        password = self.get_password(BLUE + "🔑 Enter password (or type 'back' to return): " + RESET)
+        if password.lower() == "back":
+            return None
         cur = self.db.conn.cursor()
         cur.execute("SELECT password FROM users WHERE username = ?", (username,))
         row = cur.fetchone()
@@ -209,7 +241,9 @@ class UserManager:
     def forget_password(self):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("forgetpass")
-        username = input(YELLOW + "👤 Enter your username: " + RESET)
+        username = input(YELLOW + "👤 Enter your username (or type 'back' to return): " + RESET)
+        if username.lower() == "back":
+            return
         cur = self.db.conn.cursor()
         cur.execute("SELECT security_question, security_answer FROM users WHERE username = ?", (username,))
         row = cur.fetchone()
@@ -217,10 +251,17 @@ class UserManager:
             # Decrypt the stored security question for display
             decrypted_question = decrypt_data(row[0])
             print(YELLOW + "Q: " + decrypted_question + RESET)
-            answer = input(YELLOW + "🔑 Answer: " + RESET).lower()
+            answer = input(YELLOW + "🔑 Answer (or type 'back' to return): " + RESET).lower()
+            if answer.lower() == "back":
+                return
             decrypted_answer = decrypt_data(row[1])
             if answer == decrypted_answer:
-                new_password = UserManager.get_password(GREEN + "🔒 Enter new password: " + RESET)
+                new_password = UserManager.get_password(GREEN + "🔒 Enter new password (or type 'auto' to generate, 'back' to return): " + RESET)
+                if new_password.lower() == "back":
+                    return
+                if new_password.lower() == "auto":
+                    new_password = auto_generate_password()
+                    print(YELLOW + f"Auto-generated Password: {new_password}" + RESET)
                 rating = check_password_strength(new_password)
                 print(YELLOW + f"New Password Strength: {rating}" + RESET)
                 if rating == "Weak":
@@ -241,10 +282,12 @@ class UserManager:
     def delete_account(self):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("delacc")
-        username = input(YELLOW + "🗑️  Enter username: " + RESET)
+        username = input(YELLOW + "🗑️  Enter username (or type 'back' to return): " + RESET)
         if username.lower() == "back":
             return
-        password = self.get_password(YELLOW + "🔑  Enter password: " + RESET)
+        password = self.get_password(YELLOW + "🔑  Enter password (or type 'back' to return): " + RESET)
+        if password.lower() == "back":
+            return
         cur = self.db.conn.cursor()
         cur.execute("SELECT password FROM users WHERE username = ?", (username,))
         row = cur.fetchone()
@@ -270,10 +313,21 @@ class PasswordManager:
     def add_password(self, username):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("addpass")
-        platform = input(GREEN + "🌐 Enter platform name: " + RESET).lower()
-        platform_username = input(GREEN + "👤 Enter username: " + RESET)
-        email = input(GREEN + "📧 Enter email: " + RESET)
-        password = UserManager.get_password(GREEN + "🔒 Enter password: " + RESET)
+        platform = input(GREEN + "🌐 Enter platform name (or type 'back' to return): " + RESET).lower()
+        if platform.lower() == "back":
+            return
+        platform_username = input(GREEN + "👤 Enter username (or type 'back' to return): " + RESET)
+        if platform_username.lower() == "back":
+            return
+        email = input(GREEN + "📧 Enter email (or type 'back' to return): " + RESET)
+        if email.lower() == "back":
+            return
+        password = UserManager.get_password(GREEN + "🔒 Enter password (or type 'auto' to generate, 'back' to return): " + RESET)
+        if password.lower() == "back":
+            return
+        if password.lower() == "auto":
+            password = auto_generate_password()
+            print(YELLOW + f"Auto-generated Password: {password}" + RESET)
         rating = check_password_strength(password)
         print(YELLOW + f"Password Strength: {rating}" + RESET)
         if rating == "Weak":
@@ -300,7 +354,9 @@ class PasswordManager:
     def access_passwords(self, username):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("accesspass")
-        platform = input(CYAN + "🔎 Enter platform name: " + RESET).lower()
+        platform = input(CYAN + "🔎 Enter platform name (or type 'back' to return): " + RESET).lower()
+        if platform.lower() == "back":
+            return
         cur = self.db.conn.cursor()
         cur.execute("SELECT platform_username, email, password FROM passwords WHERE username = ? AND platform = ?", (username, platform))
         row = cur.fetchone()
@@ -314,7 +370,9 @@ class PasswordManager:
     def delete_password(self, username):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("delpass")
-        platform = input(YELLOW + "🗑️ Enter platform name to delete: " + RESET).lower()
+        platform = input(YELLOW + "🗑️ Enter platform name to delete (or type 'back' to return): " + RESET).lower()
+        if platform.lower() == "back":
+            return
         cur = self.db.conn.cursor()
         cur.execute("SELECT id FROM passwords WHERE username = ? AND platform = ?", (username, platform))
         row = cur.fetchone()
@@ -329,13 +387,22 @@ class PasswordManager:
     def edit_password(self, username):
         os.system("cls" if os.name == "nt" else "clear")
         UI.print_heading("editpass")
-        platform = input(YELLOW + "✏️ Enter platform name to edit: " + RESET).lower()
+        platform = input(YELLOW + "✏️ Enter platform name to edit (or type 'back' to return): " + RESET).lower()
+        if platform.lower() == "back":
+            return
         cur = self.db.conn.cursor()
         cur.execute("SELECT id FROM passwords WHERE username = ? AND platform = ?", (username, platform))
         row = cur.fetchone()
         if row:
-            platform_username = input(YELLOW + "👤 Enter new username: " + RESET)
-            new_password = input(YELLOW + "🔒 Enter new password: " + RESET)
+            platform_username = input(YELLOW + "👤 Enter new username (or type 'back' to return): " + RESET)
+            if platform_username.lower() == "back":
+                return
+            new_password = input(YELLOW + "🔒 Enter new password (or type 'auto' to generate, 'back' to return): " + RESET)
+            if new_password.lower() == "back":
+                return
+            if new_password.lower() == "auto":
+                new_password = auto_generate_password()
+                print(YELLOW + f"Auto-generated Password: {new_password}" + RESET)
             rating = check_password_strength(new_password)
             print(YELLOW + f"New Password Strength: {rating}" + RESET)
             if rating == "Weak":
