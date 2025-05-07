@@ -9,6 +9,7 @@ import socket
 import firebase_admin
 from firebase_admin import credentials, firestore
 from cryptography.fernet import Fernet
+import csv
 
 # -----------------------------
 # Color codes for terminal output
@@ -621,12 +622,99 @@ class UI:
             print(GREEN + "=" * 40)
             print("⭐ Backup & Restore Menu ⭐".center(40))
             print("=" * 40 + RESET)
+        elif txt == "csvmenu":
+            print(GREEN + "=" * 40)
+            print("⭐ CSV Import/Export Menu ⭐".center(40))
+            print("=" * 40 + RESET)
 
 class Application:
     def __init__(self, db_file):
         self.db_manager = DatabaseManager(db_file)
         self.user_manager = UserManager(self.db_manager)
         self.password_manager = PasswordManager(self.db_manager)
+
+    def csv_menu(self):
+        while True:
+            os.system("cls" if os.name == "nt" else "clear")
+            UI.print_heading("csvmenu")
+            print(CYAN + "1.  Export Data to CSV" + RESET)
+            print(CYAN + "2.  Import Data from CSV" + RESET)
+            print(CYAN + "3.  Back to Main Menu" + RESET)
+            choice = input(MAGENTA + "👉 Enter your choice: " + RESET)
+            if choice == "1":
+                self.export_csv()
+                input("\nPress Enter to continue...")
+            elif choice == "2":
+                self.import_csv()
+                input("\nPress Enter to continue...")
+            elif choice == "3":
+                break
+            else:
+                print(RED + "❌ Invalid choice! Try again." + RESET)
+                input()
+
+    def export_csv(self):
+        cur = self.db_manager.conn.cursor()
+        cur.execute("SELECT username, password, security_question, security_answer FROM users")
+        users = cur.fetchall()
+        with open("export_users.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["username","password_hash","security_question_encrypted","security_answer_encrypted"])
+            writer.writerows(users)
+        cur.execute("SELECT id, username, platform, platform_username, email, password FROM passwords")
+        pwds = cur.fetchall()
+        with open("export_passwords.csv","w",newline="",encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id","username","platform","platform_username","email","password_encrypted"])
+            writer.writerows(pwds)
+        print(GREEN + "✅ Data exported to export_users.csv & export_passwords.csv" + RESET)
+
+    def import_csv(self):
+        confirm = input(YELLOW + "⚠️  This will overwrite your local data. Continue? (yes/no): " + RESET)
+        if confirm.lower() not in ["yes","y"]:
+            print(RED + "Import canceled." + RESET)
+            return
+        pass_file = input("Enter Passwords CSV file name or full path: ")
+        if pass_file == "":
+            print(RED + "File name cannot be empty." + RESET)
+            return
+        user_file = input("Enter Users CSV file name or full path: ")
+        if user_file == "":
+            print(RED + "File name cannot be empty." + RESET)
+            return
+        if ".csv" in pass_file:
+            pass_file += ".csv"
+
+        if ".csv" in user_file:
+            user_file += ".csv"
+        
+        if not (os.path.exists(pass_file) and os.path.exists(user_file)):
+            print(RED + "CSV files not found." + RESET)
+            return
+        
+        cur = self.db_manager.conn.cursor()
+        cur.execute("DELETE FROM passwords")
+        cur.execute("DELETE FROM users")
+        self.db_manager.conn.commit()
+        # import users
+        with open(user_file, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                cur.execute(
+                    "INSERT INTO users (username,password,security_question,security_answer) VALUES (?,?,?,?)",
+                    (row["username"], row["password_hash"], row["security_question_encrypted"], row["security_answer_encrypted"])
+                )
+        # import passwords
+        with open("export_passwords.csv", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                cur.execute(
+                    "INSERT INTO passwords (id,username,platform,platform_username,email,password) VALUES (?,?,?,?,?,?)",
+                    (row["id"], row["username"], row["platform"], row["platform_username"], row["email"], row["password_encrypted"])
+                )
+        self.db_manager.conn.commit()
+        print(GREEN + "✅ Data imported from CSV successfully!" + RESET)
+
 
     def backup_restore_menu(self):
         while True:
@@ -687,7 +775,8 @@ class Application:
             print(CYAN + "3.  List Users" + RESET)
             print(CYAN + "4.  Delete Account" + RESET)
             print(CYAN + "5.  Backup & Restore" + RESET)
-            print(CYAN + "6.  Exit" + RESET)
+            print(CYAN + "6.  CSV Import/Export" + RESET)
+            print(CYAN + "7.  Exit" + RESET)
             choice = input(MAGENTA + "👉 Enter your choice: " + RESET)
             if choice == "1":
                 self.user_manager.signup()
@@ -703,6 +792,8 @@ class Application:
                 self.user_manager.delete_account()
             elif choice == "5":
                 self.backup_restore_menu()
+            elif choice == "6":
+                self.csv_menu()
             elif choice == "6":
                 print(GREEN + "🚪 Exiting... Goodbye!" + RESET)
                 break
