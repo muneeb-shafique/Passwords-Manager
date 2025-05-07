@@ -6,14 +6,13 @@ import csv
 import socket
 import secrets
 import string
-import pwinput
 from cryptography.fernet import Fernet
 import firebase_admin
 from firebase_admin import credentials, firestore
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QStackedWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QListWidget, QMessageBox, QFileDialog,
-    QTableWidget, QTableWidgetItem, QInputDialog, QTextEdit, QFormLayout, QGroupBox
+    QTableWidget, QTableWidgetItem, QInputDialog, QFormLayout, QGroupBox
 )
 from PyQt5.QtGui import QFont, QColor, QPalette
 from PyQt5.QtCore import Qt
@@ -93,14 +92,13 @@ class DatabaseManager:
 # Firebase Init
 # --------------------
 db_online = None
-
 def init_firebase():
     global db_online
     try:
         cred = credentials.Certificate("serviceAccountKey.json")
         firebase_admin.initialize_app(cred)
         db_online = firestore.client()
-    except Exception as e:
+    except Exception:
         db_online = None
 
 # --------------------
@@ -126,7 +124,6 @@ class UserManager:
 
     def signup(self, username: str, password: str, question: str, answer: str) -> bool:
         c = self.db.conn.cursor()
-        # check exists
         c.execute("SELECT 1 FROM users WHERE username=?", (username,))
         if c.fetchone(): return False
         pwd_hash = self.hash_password(password)
@@ -230,7 +227,6 @@ def export_csv(db: DatabaseManager):
         w.writerow(["id","owner","platform","platform_user","email","pwd"])
         w.writerows(pwds)
 
-
 def import_csv(db: DatabaseManager):
     c = db.conn.cursor()
     c.execute("DELETE FROM passwords")
@@ -303,10 +299,35 @@ class SecureManagerGUI(QWidget):
         self.build_ui()
 
     def apply_theme(self):
+        # global black/green theme
         pal = QPalette()
         pal.setColor(QPalette.Window, QColor(0,0,0))
         pal.setColor(QPalette.WindowText, QColor(0,255,0))
         self.setPalette(pal)
+        # widget stylesheet
+        self.setStyleSheet("""
+            QWidget { background-color: #000; color: #0f0; font-family: Consolas; }
+            QLineEdit, QTextEdit, QTableWidget, QListWidget {
+                background-color: #000; color: #0f0;
+                border: 1px solid #0f0; border-radius: 4px;
+            }
+            QPushButton {
+                background-color: transparent; color: #0f0;
+                border: 1px solid #0f0; border-radius: 4px;
+                padding: 6px;
+            }
+            QPushButton:hover { background-color: #003300; }
+            QHeaderView::section {
+                background-color: #000; color: #0f0;
+                border: 1px solid #0f0;
+            }
+            QTableWidget::item {
+                selection-background-color: #033; selection-color: #0f0;
+            }
+            QListWidget::item:selected {
+                background-color: #033; color: #0f0;
+            }
+        """)
 
     def build_ui(self):
         self.stack = QStackedWidget()
@@ -330,23 +351,17 @@ class SecureManagerGUI(QWidget):
     def screen_login(self):
         w = QWidget()
         form = QFormLayout()
-        lbl = QLabel("Login")
-        lbl.setFont(QFont('Consolas',20))
+        lbl = QLabel("Login"); lbl.setFont(QFont('Consolas',24))
         form.addRow(lbl)
-        self.login_user = QLineEdit()
-        self.login_user.setPlaceholderText("Username")
+        self.login_user = QLineEdit(); self.login_user.setPlaceholderText("Username")
         form.addRow("User:", self.login_user)
-        self.login_pwd = QLineEdit()
-        self.login_pwd.setEchoMode(QLineEdit.Password)
+        self.login_pwd = QLineEdit(); self.login_pwd.setEchoMode(QLineEdit.Password)
         self.login_pwd.setPlaceholderText("Password")
         form.addRow("Password:", self.login_pwd)
-        btn_login = QPushButton("Login")
-        btn_login.clicked.connect(self.do_login)
+        btn_login = QPushButton("Login"); btn_login.clicked.connect(self.do_login)
         btn_to_signup = QPushButton("Sign Up")
         btn_to_signup.clicked.connect(lambda: self.stack.setCurrentWidget(self.signup_screen))
-        h = QHBoxLayout()
-        h.addWidget(btn_login)
-        h.addWidget(btn_to_signup)
+        h = QHBoxLayout(); h.addWidget(btn_login); h.addWidget(btn_to_signup)
         form.addRow(h)
         w.setLayout(form)
         return w
@@ -367,65 +382,71 @@ class SecureManagerGUI(QWidget):
     def screen_signup(self):
         w = QWidget()
         form = QFormLayout()
-        lbl=QLabel("Sign Up");lbl.setFont(QFont('Consolas',20))
+        lbl = QLabel("Sign Up"); lbl.setFont(QFont('Consolas',24))
         form.addRow(lbl)
         self.su_user = QLineEdit(); self.su_user.setPlaceholderText("Username")
-        form.addRow("User:",self.su_user)
+        form.addRow("User:", self.su_user)
         self.su_pwd = QLineEdit(); self.su_pwd.setEchoMode(QLineEdit.Password)
         self.su_pwd.setPlaceholderText("Password")
-        form.addRow("Password:",self.su_pwd)
+        form.addRow("Password:", self.su_pwd)
         self.su_q = QLineEdit(); self.su_q.setPlaceholderText("Security Question")
-        form.addRow("Question:",self.su_q)
+        form.addRow("Question:", self.su_q)
         self.su_a = QLineEdit(); self.su_a.setPlaceholderText("Answer")
-        form.addRow("Answer:",self.su_a)
-        btn_create=QPushButton("Create");btn_create.clicked.connect(self.do_signup)
-        btn_back=QPushButton("Back");btn_back.clicked.connect(lambda: self.stack.setCurrentWidget(self.login_screen))
-        h=QHBoxLayout();h.addWidget(btn_create);h.addWidget(btn_back)
+        form.addRow("Answer:", self.su_a)
+        btn_create = QPushButton("Create"); btn_create.clicked.connect(self.do_signup)
+        btn_back = QPushButton("Back")
+        btn_back.clicked.connect(lambda: self.stack.setCurrentWidget(self.login_screen))
+        h = QHBoxLayout(); h.addWidget(btn_create); h.addWidget(btn_back)
         form.addRow(h)
-        w.setLayout(form);return w
+        w.setLayout(form); return w
 
     def do_signup(self):
         u,p,q,a = self.su_user.text().strip(), self.su_pwd.text(), self.su_q.text(), self.su_a.text()
         if not u or not p or not q or not a:
-            QMessageBox.warning(self, "Error","All fields required.")
+            QMessageBox.warning(self, "Error", "All fields required.")
             return
         if self.user_logic.signup(u,p,q,a):
-            QMessageBox.information(self, "Success","Account created.")
+            QMessageBox.information(self, "Success", "Account created.")
             self.stack.setCurrentWidget(self.login_screen)
-            self.su_user.clear();self.su_pwd.clear();self.su_q.clear();self.su_a.clear()
+            self.su_user.clear(); self.su_pwd.clear(); self.su_q.clear(); self.su_a.clear()
         else:
-            QMessageBox.warning(self, "Error","Username exists.")
+            QMessageBox.warning(self, "Error", "Username exists.")
 
     # -- Dashboard --
     def screen_dashboard(self):
-        w=QWidget();v=QVBoxLayout()
-        btn_manage = QPushButton("Manage Passwords"); btn_manage.clicked.connect(lambda:self.stack.setCurrentWidget(self.pwd_screen))
-        btn_backup = QPushButton("Backup/Restore"); btn_backup.clicked.connect(lambda:self.stack.setCurrentWidget(self.backup_screen))
-        btn_csv = QPushButton("CSV Import/Export"); btn_csv.clicked.connect(lambda:self.stack.setCurrentWidget(self.csv_screen))
-        btn_logout=QPushButton("Logout"); btn_logout.clicked.connect(self.do_logout)
-        for btn in [btn_manage,btn_backup,btn_csv,btn_logout]:
-            btn.setFont(QFont('Consolas',14));v.addWidget(btn)
-        w.setLayout(v);return w
+        w = QWidget(); v = QVBoxLayout()
+        for text, func in [
+            ("Manage Passwords", lambda:self.stack.setCurrentWidget(self.pwd_screen)),
+            ("Backup/Restore", lambda:self.stack.setCurrentWidget(self.backup_screen)),
+            ("CSV Import/Export", lambda:self.stack.setCurrentWidget(self.csv_screen)),
+            ("Logout", self.do_logout)
+        ]:
+            btn = QPushButton(text); btn.clicked.connect(func)
+            btn.setFont(QFont('Consolas',16)); v.addWidget(btn)
+        w.setLayout(v); return w
 
     def do_logout(self):
-        self.current_user=None; self.stack.setCurrentWidget(self.login_screen)
+        self.current_user = None
+        self.stack.setCurrentWidget(self.login_screen)
 
     # -- Password Manager Screen --
     def screen_passwords(self):
-        w=QWidget();v=QVBoxLayout()
-        h=QHBoxLayout()
-        self.platform_list=QListWidget(); self.platform_list.clicked.connect(self.on_platform_select)
-        self.pwd_table=QTableWidget(0,4)
+        w = QWidget(); v = QVBoxLayout(); h = QHBoxLayout()
+        self.platform_list = QListWidget(); self.platform_list.clicked.connect(self.on_platform_select)
+        self.pwd_table = QTableWidget(0,4)
         self.pwd_table.setHorizontalHeaderLabels(["ID","User","Email","Password"])
-        h.addWidget(self.platform_list);h.addWidget(self.pwd_table)
+        h.addWidget(self.platform_list,1); h.addWidget(self.pwd_table,3)
         v.addLayout(h)
-        btn_add=QPushButton("Add");btn_add.clicked.connect(self.on_add_pwd)
-        btn_edit=QPushButton("Edit");btn_edit.clicked.connect(self.on_edit_pwd)
-        btn_del=QPushButton("Delete");btn_del.clicked.connect(self.on_del_pwd)
-        btn_health=QPushButton("Check Health");btn_health.clicked.connect(self.on_check_health)
-        btn_back=QPushButton("Back");btn_back.clicked.connect(lambda:self.stack.setCurrentWidget(self.dashboard))
-        for btn in [btn_add,btn_edit,btn_del,btn_health,btn_back]: btn.setFont(QFont('Consolas',12)); v.addWidget(btn)
-        w.setLayout(v);return w
+        for text, func in [
+            ("Add", self.on_add_pwd),
+            ("Edit", self.on_edit_pwd),
+            ("Delete", self.on_del_pwd),
+            ("Check Health", self.on_check_health),
+            ("Back", lambda:self.stack.setCurrentWidget(self.dashboard))
+        ]:
+            btn = QPushButton(text); btn.clicked.connect(func)
+            btn.setFont(QFont('Consolas',12)); v.addWidget(btn)
+        w.setLayout(v); return w
 
     def refresh_password_list(self):
         self.platform_list.clear()
@@ -442,31 +463,31 @@ class SecureManagerGUI(QWidget):
                 self.pwd_table.setItem(i,j,QTableWidgetItem(str(val)))
 
     def on_add_pwd(self):
-        plat, ok = QInputDialog.getText(self, "Platform","Enter platform name:")
+        plat, ok = QInputDialog.getText(self, "Platform", "Enter platform name:")
         if not ok or not plat: return
-        user, ok = QInputDialog.getText(self, "Platform User","Enter platform username:")
+        user, ok = QInputDialog.getText(self, "Username", "Enter platform username:")
         if not ok or not user: return
-        email, ok = QInputDialog.getText(self, "Email","Enter email:")
+        email, ok = QInputDialog.getText(self, "Email", "Enter email:")
         if not ok or not email: return
-        pwd, ok = QInputDialog.getText(self, "Password","Enter password:")
+        pwd, ok = QInputDialog.getText(self, "Password", "Enter password:")
         if not ok or not pwd: return
-        self.pwd_logic.add_password(self.current_user,plat,user,email,pwd)
+        self.pwd_logic.add_password(self.current_user, plat, user, email, pwd)
         self.refresh_password_list()
 
     def on_edit_pwd(self):
         row = self.pwd_table.currentRow()
-        if row<0: return
+        if row < 0: return
         pwd_id = int(self.pwd_table.item(row,0).text())
-        new_user, ok = QInputDialog.getText(self, "Edit User","New platform user:")
+        new_user, ok = QInputDialog.getText(self, "Edit User", "New platform user:")
         if not ok: return
-        new_pwd, ok = QInputDialog.getText(self, "Edit Password","New password:")
+        new_pwd, ok = QInputDialog.getText(self, "Edit Password", "New password:")
         if not ok: return
-        self.pwd_logic.update_password(pwd_id,new_user,new_pwd)
+        self.pwd_logic.update_password(pwd_id, new_user, new_pwd)
         self.on_platform_select()
 
     def on_del_pwd(self):
         row = self.pwd_table.currentRow()
-        if row<0: return
+        if row < 0: return
         pwd_id = int(self.pwd_table.item(row,0).text())
         self.pwd_logic.delete_password(pwd_id)
         self.on_platform_select()
@@ -478,12 +499,15 @@ class SecureManagerGUI(QWidget):
 
     # -- Backup/Restore Screen --
     def screen_backup(self):
-        w=QWidget();v=QVBoxLayout()
-        btn_backup=QPushButton("Backup Online");btn_backup.clicked.connect(self.do_backup)
-        btn_restore=QPushButton("Restore Online");btn_restore.clicked.connect(self.do_restore)
-        btn_back=QPushButton("Back");btn_back.clicked.connect(lambda:self.stack.setCurrentWidget(self.dashboard))
-        for b in [btn_backup,btn_restore,btn_back]:b.setFont(QFont('Consolas',12));v.addWidget(b)
-        w.setLayout(v);return w
+        w = QWidget(); v = QVBoxLayout()
+        for text, func in [
+            ("Backup Online", self.do_backup),
+            ("Restore Online", self.do_restore),
+            ("Back", lambda:self.stack.setCurrentWidget(self.dashboard))
+        ]:
+            btn = QPushButton(text); btn.clicked.connect(func)
+            btn.setFont(QFont('Consolas',14)); v.addWidget(btn)
+        w.setLayout(v); return w
 
     def do_backup(self):
         ok = backup_online(self.db)
@@ -495,16 +519,16 @@ class SecureManagerGUI(QWidget):
 
     # -- CSV Screen --
     def screen_csv(self):
-        w=QWidget();v=QVBoxLayout()
-        btn_export=QPushButton("Export CSV");btn_export.clicked.connect(lambda: (export_csv(self.db), QMessageBox.information(self,"CSV","Export done")))
-        btn_import=QPushButton("Import CSV");btn_import.clicked.connect(lambda: (import_csv(self.db), QMessageBox.information(self,"CSV","Import done")))
-        btn_back=QPushButton("Back");btn_back.clicked.connect(lambda:self.stack.setCurrentWidget(self.dashboard))
-        for b in [btn_export,btn_import,btn_back]:b.setFont(QFont('Consolas',12));v.addWidget(b)
-        w.setLayout(v);return w
+        w = QWidget(); v = QVBoxLayout()
+        for text, func in [
+            ("Export CSV", lambda: (export_csv(self.db), QMessageBox.information(self,"CSV","Export done"))),
+            ("Import CSV", lambda: (import_csv(self.db), QMessageBox.information(self,"CSV","Import done"))),
+            ("Back", lambda:self.stack.setCurrentWidget(self.dashboard))
+        ]:
+            btn = QPushButton(text); btn.clicked.connect(func)
+            btn.setFont(QFont('Consolas',14)); v.addWidget(btn)
+        w.setLayout(v); return w
 
-# --------------------
-# Launch Application
-# --------------------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     gui = SecureManagerGUI()
